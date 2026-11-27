@@ -1,7 +1,9 @@
 import unittest
+import random
 from datetime import date
 
 from app.services.protocol_register import (
+    BrowserProfileRotator,
     DreaminaProtocolFlow,
     ProtocolRegistrationError,
     ProtocolResponse,
@@ -124,6 +126,17 @@ class ProtocolRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProtocolEncodingTests(unittest.TestCase):
+    def test_browser_profiles_use_randomized_round_robin(self):
+        profiles = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+        rotator = BrowserProfileRotator(profiles, rng=random.Random(7))
+
+        first_cycle = [rotator.next()["name"] for _ in profiles]
+        second_cycle = [rotator.next()["name"] for _ in profiles]
+
+        self.assertEqual(set(first_cycle), {"A", "B", "C"})
+        self.assertEqual(set(second_cycle), {"A", "B", "C"})
+        self.assertNotEqual(first_cycle[-1], second_cycle[0])
+
     def test_xor5_matches_har_value(self):
         self.assertEqual(
             xor5_hex("0.toffees-ocean@icloud.com"),

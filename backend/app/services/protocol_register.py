@@ -11,6 +11,7 @@ import json
 import logging
 import random
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -122,6 +123,36 @@ PROTOCOL_BROWSER_PROFILES = [
 ]
 
 
+class BrowserProfileRotator:
+    """Randomized round-robin: every profile is used once per shuffled cycle."""
+
+    def __init__(self, profiles: list[dict[str, str]], rng: random.Random | None = None):
+        if not profiles:
+            raise ValueError("浏览器画像池不能为空")
+        self._profiles = tuple(profiles)
+        self._rng = rng or random.SystemRandom()
+        self._queue: list[dict[str, str]] = []
+        self._last_profile: dict[str, str] | None = None
+        self._lock = threading.Lock()
+
+    def next(self) -> dict[str, str]:
+        with self._lock:
+            if not self._queue:
+                self._queue = list(self._profiles)
+                self._rng.shuffle(self._queue)
+                if (
+                    len(self._queue) > 1
+                    and self._last_profile is not None
+                    and self._queue[-1] is self._last_profile
+                ):
+                    self._queue[0], self._queue[-1] = self._queue[-1], self._queue[0]
+            self._last_profile = self._queue.pop()
+            return self._last_profile
+
+
+PROTOCOL_BROWSER_PROFILE_ROTATOR = BrowserProfileRotator(PROTOCOL_BROWSER_PROFILES)
+
+
 class PureHttpTransport:
     """curl_cffi 驱动的纯 HTTP 会话与 TLS/HTTP2 指纹容器。"""
 
@@ -133,7 +164,7 @@ class PureHttpTransport:
         self.locale = locale
         self.language = language
         self.timezone = timezone
-        self.profile = random.choice(PROTOCOL_BROWSER_PROFILES)
+        self.profile = PROTOCOL_BROWSER_PROFILE_ROTATOR.next()
         self.webid = str(
             secrets.randbelow(9_000_000_000_000_000_000)
             + 1_000_000_000_000_000_000
@@ -145,6 +176,7 @@ class PureHttpTransport:
             "profile_name": self.profile["name"],
             "impersonate": self.profile["impersonate"],
             "chrome_version": self.profile["version"],
+            "platform": self.profile["platform"],
             "user_agent": self.user_agent,
             "locale": locale,
             "language": language,
