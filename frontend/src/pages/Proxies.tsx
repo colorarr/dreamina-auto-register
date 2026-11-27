@@ -59,21 +59,40 @@ export default function Proxies() {
     const [bulkApplying, setBulkApplying] = useState(false)
     const [sortBy, setSortBy] = useState<'usage' | 'latency' | 'name'>('name')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+    const [page, setPage] = useState(1)
+    const [pages, setPages] = useState(1)
+    const [total, setTotal] = useState(0)
+    const [nodeTypes, setNodeTypes] = useState<string[]>([])
+    const [regionOptions, setRegionOptions] = useState<string[]>([])
+    const pageSize = 100
 
     useEffect(() => {
         fetchData()
-    }, [])
+    }, [page, filters, sortBy, sortDir])
 
     const fetchData = async () => {
         try {
-            const [proxiesData, poolData] = await Promise.all([
-                proxiesApi.list(),
-                proxiesApi.getPoolStatus()
+            const [proxiesData, poolData, facets] = await Promise.all([
+                proxiesApi.list({
+                    page,
+                    page_size: pageSize,
+                    node_type: filters.type,
+                    region: filters.region,
+                    enabled: filters.enabled,
+                    sort_by: sortBy,
+                    sort_dir: sortDir,
+                }),
+                proxiesApi.getPoolStatus(),
+                proxiesApi.facets(),
             ])
-            cachedProxies = proxiesData
+            cachedProxies = proxiesData.items
             cachedPoolStatus = poolData
-            setNodes(proxiesData)
+            setNodes(proxiesData.items)
+            setTotal(proxiesData.total)
+            setPages(proxiesData.pages)
             setPoolStatus(poolData)
+            setNodeTypes(facets.types)
+            setRegionOptions(facets.regions)
         } catch (error) {
             console.error('Failed to fetch data:', error)
         }
@@ -202,6 +221,7 @@ export default function Proxies() {
     }
 
     const toggleSort = (field: 'usage' | 'latency' | 'name') => {
+        setPage(1)
         if (sortBy === field) {
             setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
         } else {
@@ -209,34 +229,7 @@ export default function Proxies() {
         }
     }
 
-    const uniqueTypes = useMemo(() => Array.from(new Set(nodes.map(n => n.node_type).filter((t): t is string => !!t))), [nodes])
-    // 直接从 DB 的 region_tag 字段动态生成地域列表（支持任意国家）
-    const uniqueRegions = useMemo(() => {
-        const codes = new Set<string>()
-        nodes.forEach(n => {
-            if (n.region_tag && n.region_tag !== 'UN') codes.add(n.region_tag.toUpperCase())
-        })
-        return Array.from(codes).sort()
-    }, [nodes])
-
-    const filteredNodes = useMemo(() => {
-        let result = [...nodes]
-        if (filters.type !== 'all') result = result.filter(n => n.node_type === filters.type)
-        // 直接按 region_tag 字段精确筛选
-        if (filters.region !== 'all') result = result.filter(n => (n.region_tag || '').toUpperCase() === filters.region)
-        if (filters.enabled !== 'all') result = result.filter(n => n.is_enabled === (filters.enabled === 'true'))
-
-        result.sort((a, b) => {
-            let cmp = 0
-            switch (sortBy) {
-                case 'usage': cmp = a.usage_count - b.usage_count; break
-                case 'latency': cmp = (a.latency || 9999) - (b.latency || 9999); break
-                case 'name': cmp = a.name.localeCompare(b.name); break
-            }
-            return sortDir === 'asc' ? cmp : -cmp
-        })
-        return result
-    }, [nodes, filters, sortBy, sortDir])
+    const filteredNodes = nodes
 
     const getLatencyIcon = (latency: number | null) => {
         if (latency === null) return <Signal className="h-4 w-4 text-muted-foreground" />
@@ -334,26 +327,26 @@ export default function Proxies() {
 
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-[200px]">
-                    <Select value={filters.type} onValueChange={(v) => setFilters({ ...filters, type: v })}>
+                    <Select value={filters.type} onValueChange={(v) => { setPage(1); setFilters({ ...filters, type: v }) }}>
                         <SelectTrigger>
                             <SelectValue placeholder={t('proxies.filter.protocol')} />
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">{t('proxies.filter.all')}</SelectItem>
-                            {uniqueTypes.map(type => (
+                            {nodeTypes.map(type => (
                                 <SelectItem key={type} value={type}>{type}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
                 </div>
                 <div className="w-full md:w-[200px]">
-                    <Select value={filters.region} onValueChange={(v) => setFilters({ ...filters, region: v })}>
+                    <Select value={filters.region} onValueChange={(v) => { setPage(1); setFilters({ ...filters, region: v }) }}>
                         <SelectTrigger>
                             <SelectValue placeholder={t('proxies.filter.region')} />
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">{t('proxies.filter.all_regions')}</SelectItem>
-                            {uniqueRegions.map(code => {
+                            {regionOptions.map(code => {
                                 const { flag, label } = getRegionDisplay(code)
                                 return (
                                     <SelectItem key={code} value={code}>
@@ -368,7 +361,7 @@ export default function Proxies() {
                     </Select>
                 </div>
                 <div className="w-full md:w-[200px]">
-                    <Select value={filters.enabled} onValueChange={(v) => setFilters({ ...filters, enabled: v })}>
+                    <Select value={filters.enabled} onValueChange={(v) => { setPage(1); setFilters({ ...filters, enabled: v }) }}>
                         <SelectTrigger>
                             <SelectValue placeholder={t('proxies.filter.status')} />
                         </SelectTrigger>
@@ -548,6 +541,17 @@ export default function Proxies() {
                     </TableBody >
                 </Table >
             </div >
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>共 {total} 条 · 第 {page}/{pages} 页 · 每页 {pageSize} 条</span>
+                <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>
+                        上一页
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage(value => value + 1)}>
+                        下一页
+                    </Button>
+                </div>
+            </div>
         </div >
     )
 }

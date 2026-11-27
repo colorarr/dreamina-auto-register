@@ -327,6 +327,32 @@ class ProxyNodeResponse(BaseModel):
         from_attributes = True
 
 
+class ProxyNodeListItem(BaseModel):
+    """代理列表轻量字段，不返回凭据和连接密码。"""
+
+    id: int
+    name: str
+    node_type: Optional[str] = None
+    source: Optional[str] = None
+    region_tag: Optional[str] = None
+    is_enabled: bool
+    latency: Optional[int] = None
+    is_healthy: Optional[bool] = None
+    usage_count: int
+    last_tested_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProxyNodeListResponse(BaseModel):
+    items: List[ProxyNodeListItem]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
 class ProxyNodeUpdate(BaseModel):
     """更新代理节点"""
 

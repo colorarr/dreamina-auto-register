@@ -2,14 +2,19 @@
 代理管理 API 路由
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from app.core import get_db
 from app.core.config import settings
 from app.models import ProxyNode
-from app.schemas import ProxyNodeResponse, ProxyNodeUpdate, MessageResponse
+from app.schemas import (
+    ProxyNodeListResponse,
+    ProxyNodeResponse,
+    ProxyNodeUpdate,
+    MessageResponse,
+)
 from app.services.clash_manager import clash_manager
 from app.services.proxy_pool import ProxyConfig
 from pydantic import BaseModel, Field
@@ -110,52 +115,77 @@ async def import_proxies(data: ProxyImportRequest, db: AsyncSession = Depends(ge
     }
 
 
-@router.get("", response_model=List[ProxyNodeResponse])
-async def list_proxies(db: AsyncSession = Depends(get_db)):
-    """获取代理节点列表 (合并数据库节点和内存中的外部节点)"""
-    # 1. 获取数据库中的管理节点 (Clash 节点)
-    stmt = select(ProxyNode).order_by(ProxyNode.name)
-    result = await db.execute(stmt)
-    nodes = list(result.scalars().all())
-    
-    # 2. 将内存池中各代理节点的健康度、延迟、使用次数同步持久化到数据库
-    from app.services.proxy_pool import proxy_pool
-    from sqlalchemy import update
-    
-    # 提取所有带有 node_id 的内存态节点
-    memory_updates = {}
-    async with proxy_pool.lock:
-        for p in proxy_pool.proxies:
-            if p.node_id:
-                memory_updates[p.node_id] = {
-                    "is_healthy": p.is_healthy,
-                    "latency": p.latency,
-                    "usage_count": p.usage_count,
-                    "is_enabled": p.is_enabled
-                }
-                
-    if memory_updates:
-        for db_node in nodes:
-            stats = memory_updates.get(db_node.id)
-            if stats:
-                db_node.is_healthy = stats["is_healthy"]
-                db_node.latency = stats["latency"]
-                db_node.usage_count = stats["usage_count"]
-                
-                # 更新数据库
-                await db.execute(
-                    update(ProxyNode)
-                    .where(ProxyNode.id == db_node.id)
-                    .values(**stats)
-                )
-        await db.commit()
-        
-        # 重新获取，防止 DetachedInstanceError
-        stmt = select(ProxyNode).order_by(ProxyNode.name)
-        result = await db.execute(stmt)
-        nodes = list(result.scalars().all())
+@router.get("", response_model=ProxyNodeListResponse)
+async def list_proxies(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=20, le=200),
+    node_type: str | None = Query(None),
+    region: str | None = Query(None),
+    enabled: bool | None = Query(None),
+    sort_by: str = Query("name", pattern="^(name|latency|usage)$"),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """分页读取代理列表；GET 请求不再执行逐行数据库写入。"""
+    filters = []
+    if node_type and node_type != "all":
+        filters.append(ProxyNode.node_type == node_type)
+    if region and region != "all":
+        filters.append(func.upper(ProxyNode.region_tag) == region.upper())
+    if enabled is not None:
+        filters.append(ProxyNode.is_enabled == enabled)
 
-    return nodes
+    total = (
+        await db.execute(select(func.count(ProxyNode.id)).where(*filters))
+    ).scalar_one()
+    sort_columns = {
+        "name": ProxyNode.name,
+        "latency": ProxyNode.latency,
+        "usage": ProxyNode.usage_count,
+    }
+    sort_column = sort_columns[sort_by]
+    ordering = sort_column.desc() if sort_dir == "desc" else sort_column.asc()
+    stmt = (
+        select(ProxyNode)
+        .where(*filters)
+        .order_by(ordering, ProxyNode.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    nodes = list((await db.execute(stmt)).scalars().all())
+    return {
+        "items": nodes,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, (total + page_size - 1) // page_size),
+    }
+
+
+@router.get("/facets")
+async def list_proxy_facets(db: AsyncSession = Depends(get_db)):
+    """返回代理列表筛选项，避免为筛选器下载全部节点。"""
+    types = (
+        await db.execute(
+            select(ProxyNode.node_type)
+            .where(ProxyNode.node_type.isnot(None))
+            .distinct()
+        )
+    ).scalars().all()
+    regions = (
+        await db.execute(
+            select(ProxyNode.region_tag)
+            .where(
+                ProxyNode.region_tag.isnot(None),
+                func.upper(ProxyNode.region_tag) != "UN",
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    return {
+        "types": sorted({str(value) for value in types if value}),
+        "regions": sorted({str(value).upper() for value in regions if value}),
+    }
 
 
 @router.get("/pool-status")
@@ -723,25 +753,15 @@ async def test_node_latency(node_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/pool/status")
 async def get_pool_status(db: AsyncSession = Depends(get_db)):
-    """获取代理节点统计（从数据库读取）"""
-    from sqlalchemy import func
-    
-    total_q = await db.execute(select(func.count()).select_from(ProxyNode))
-    total = total_q.scalar() or 0
-    
-    enabled_q = await db.execute(
-        select(func.count()).select_from(ProxyNode).where(ProxyNode.is_enabled == True)
-    )
-    enabled = enabled_q.scalar() or 0
-    
-    healthy_q = await db.execute(
-        select(func.count()).select_from(ProxyNode).where(
-            ProxyNode.is_enabled == True, ProxyNode.is_healthy == True
-        )
-    )
-    healthy = healthy_q.scalar() or 0
-    
-    return {"total": total, "active": enabled, "idle": healthy}
+    """获取内存代理池实时统计。"""
+    from app.services.proxy_pool import proxy_pool
+
+    status = await proxy_pool.get_detailed_status()
+    return {
+        "total": status["total"],
+        "active": status["active"],
+        "idle": status["idle"],
+    }
 
 @router.get("/pool/debug")
 async def get_pool_debug():

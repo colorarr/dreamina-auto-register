@@ -193,7 +193,22 @@ export const contentApi = {
 
 // ============ Proxies API ============
 export const proxiesApi = {
-    list: () => api.get<ProxyNode[]>('/proxies'),
+    list: (params: {
+        page?: number
+        page_size?: number
+        node_type?: string
+        region?: string
+        enabled?: string
+        sort_by?: 'name' | 'latency' | 'usage'
+        sort_dir?: 'asc' | 'desc'
+    } = {}) => {
+        const query = new URLSearchParams()
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== '' && value !== 'all') query.set(key, String(value))
+        })
+        return api.get<ProxyListResponse>(`/proxies?${query}`)
+    },
+    facets: () => api.get<{ types: string[]; regions: string[] }>('/proxies/facets'),
     import: (text: string) =>
         api.post<{ inserted: number; duplicates: number; errors: { line: number; reason: string }[]; message: string }>(
             '/proxies/import', { text }
@@ -414,6 +429,14 @@ export interface ProxyNode {
     status_icon: string
     usage_count: number
     last_tested_at?: string
+}
+
+export interface ProxyListResponse {
+    items: ProxyNode[]
+    total: number
+    page: number
+    page_size: number
+    pages: number
 }
 
 export interface Domain {
