@@ -1172,16 +1172,12 @@ class RegisterEngine:
             account.screenshot_path = reg_result.get("screenshot_path")
             account.browser_state_path = reg_result.get("browser_state_path")
             account.fingerprint_json = reg_result.get("fingerprint_json")
-            try:
-                registration_fp = json.loads(account.fingerprint_json or "{}")
-            except (TypeError, ValueError):
-                registration_fp = {}
-            account.registration_browser_profile = registration_fp.get(
-                "profile_name"
-            ) or registration_fp.get("archetype_name")
-            account.registration_browser_version = registration_fp.get(
-                "chrome_version"
-            )
+            from app.services.browser_profile import normalize_registration_browser_profile
+
+            (
+                account.registration_browser_profile,
+                account.registration_browser_version,
+            ) = normalize_registration_browser_profile(account.fingerprint_json)
             account.all_tokens = json.dumps(reg_result.get("all_tokens", {}))
 
             # 使用真实 IP 检测到的区域更新 account

@@ -198,7 +198,7 @@ async def ensure_accounts_proxy_binding_columns():
 
 
 async def ensure_accounts_browser_profile_columns():
-    """Add queryable registration browser-profile fields."""
+    """Add and backfill queryable registration browser-profile fields."""
     columns = [
         ("registration_browser_profile", "VARCHAR(64)"),
         ("registration_browser_version", "VARCHAR(32)"),
@@ -212,6 +212,38 @@ async def ensure_accounts_browser_profile_columns():
                     text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}")
                 )
                 logger.info("Added column accounts.%s", col_name)
+
+        # Older protocol registrations only persisted fingerprint_json.  Populate
+        # the new queryable fields so they are visible in the account list too.
+        from app.services.browser_profile import normalize_registration_browser_profile
+
+        rows = await session.execute(
+            text(
+                "SELECT id, fingerprint_json FROM accounts "
+                "WHERE fingerprint_json IS NOT NULL AND fingerprint_json != '' "
+                "AND (registration_browser_profile IS NULL "
+                "OR registration_browser_profile = '' "
+                "OR registration_browser_version IS NULL "
+                "OR registration_browser_version = '')"
+            )
+        )
+        backfilled = 0
+        for account_id, fingerprint_json in rows.fetchall():
+            profile, version = normalize_registration_browser_profile(fingerprint_json)
+            if not profile and not version:
+                continue
+            await session.execute(
+                text(
+                    "UPDATE accounts SET "
+                    "registration_browser_profile = COALESCE(NULLIF(registration_browser_profile, ''), :profile), "
+                    "registration_browser_version = COALESCE(NULLIF(registration_browser_version, ''), :version) "
+                    "WHERE id = :account_id"
+                ),
+                {"profile": profile, "version": version, "account_id": account_id},
+            )
+            backfilled += 1
+        if backfilled:
+            logger.info("Backfilled browser profiles for %s accounts", backfilled)
         await session.commit()
 
 

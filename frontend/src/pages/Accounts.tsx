@@ -808,6 +808,7 @@ export default function Accounts() {
                             <TableHead>{t('accounts.table.password')}</TableHead>
                             <TableHead>{t('accounts.table.task_id')}</TableHead>
                             <TableHead>{t('accounts.table.region')}</TableHead>
+                            <TableHead>浏览器画像</TableHead>
                             <TableHead>{t('accounts.table.health')}</TableHead>
                             <TableHead>{t('accounts.table.session')}</TableHead>
                             <TableHead className="text-right">{t('accounts.table.credits')}</TableHead>
@@ -821,7 +822,7 @@ export default function Accounts() {
                     <TableBody>
                         {loading ? (
                             <TableRow>
-                                <TableCell colSpan={12} className="h-32 text-center">
+                                <TableCell colSpan={13} className="h-32 text-center">
                                     <div className="flex flex-col items-center justify-center gap-2">
                                         <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground/30" />
                                         <span className="text-sm text-muted-foreground">正在加载账号数据...</span>
@@ -830,7 +831,7 @@ export default function Accounts() {
                             </TableRow>
                         ) : sortedAccounts.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={12} className="h-32 text-center text-muted-foreground italic">
+                                <TableCell colSpan={13} className="h-32 text-center text-muted-foreground italic">
                                     没有符合当前筛选条件的账号。
                                 </TableCell>
                             </TableRow>
@@ -875,12 +876,24 @@ export default function Accounts() {
                                                     {account.registration_asn}
                                                 </span>
                                             )}
-                                            {account.registration_browser_profile && (
-                                                <span className="text-[10px] text-muted-foreground/70">
-                                                    {account.registration_browser_profile}
-                                                </span>
-                                            )}
                                         </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        {account.registration_browser_profile || account.registration_browser_version ? (
+                                            <div className="flex min-w-[132px] items-center gap-2">
+                                                <Chrome className="h-4 w-4 shrink-0 text-blue-500" />
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs font-medium">
+                                                        {account.registration_browser_profile || 'Chrome'}
+                                                    </span>
+                                                    <span className="font-mono text-[10px] text-muted-foreground">
+                                                        {account.registration_browser_version || '--'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground">未记录</span>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         {actionState?.id === account.id && actionState?.type === 'refresh' ? (
