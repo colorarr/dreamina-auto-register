@@ -42,6 +42,16 @@ class JimengClient:
         self.region = region
         self.proxy_url = proxy_url
 
+    @staticmethod
+    async def service_available(timeout: float = 2.0) -> bool:
+        """Check the local Jimeng API dependency without touching account state."""
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(f"{settings.jimeng_api_url}/ping")
+            return response.status_code == 200 and response.text.strip() == "pong"
+        except httpx.HTTPError:
+            return False
+
     def _get_formatted_token(self) -> str:
         """
         根据区域和代理配置格式化 Token。

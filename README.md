@@ -107,17 +107,21 @@ copy .env.example .env
 ```bash
 # 终端 1 - Jimeng API
 cd backend/jimeng_service
+npm install
 npm run dev
 
 # 终端 2 - 后端
 cd backend
 .venv\Scripts\activate
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8005
 
 # 终端 3 - 前端 (开发模式，可选)
 cd frontend
 npm run dev
 ```
+
+Jimeng API 默认监听 `http://127.0.0.1:5105`。积分查询、签到和内容生成依赖该服务；
+`GET /api/health` 中的 `services.jimeng_api` 必须为 `healthy`。
 
 ## ⚙️ 配置说明
 

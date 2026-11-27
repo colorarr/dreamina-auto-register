@@ -273,11 +273,15 @@ async def health_check():
 
     kv_status = cf_kv_client.is_configured
     pool_status = await proxy_pool.get_detailed_status()
+    from app.services.jimeng_api import JimengClient
+
+    jimeng_api_status = await JimengClient.service_available()
 
     return {
-        "status": "healthy",
+        "status": "healthy" if jimeng_api_status else "degraded",
         "services": {
             "proxy_pool": pool_status,
+            "jimeng_api": "healthy" if jimeng_api_status else "unavailable",
             "cloudflare_kv": "configured" if kv_status else "not_configured",
         },
     }
