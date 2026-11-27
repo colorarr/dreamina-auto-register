@@ -458,6 +458,42 @@ class TaskScheduler:
                         proxy.exit_ip = exit_ip
                         proxy.exit_asn = exit_asn
 
+                        # 地区必须以当前代理的真实出口为准，不能继续沿用导入时、
+                        # 上一次会话或凭据文本中的旧标签。
+                        detected_country = (exit_country or "UN").strip().upper()
+                        proxy.region_tag = detected_country
+                        if proxy.node_id:
+                            from app.models import ProxyNode
+
+                            await db.execute(
+                                update(ProxyNode)
+                                .where(ProxyNode.id == proxy.node_id)
+                                .values(region_tag=detected_country)
+                            )
+                            await db.commit()
+
+                        requested_country = (job.proxy_region or "").strip().upper()
+                        if (
+                            requested_country
+                            and requested_country != "UN"
+                            and detected_country != requested_country
+                        ):
+                            message = (
+                                f"代理出口地区不匹配：任务要求 {requested_country}，"
+                                f"实际检测为 {detected_country} ({exit_ip})；任务已暂停"
+                            )
+                            logger.error(message)
+                            await db.execute(
+                                update(TaskRecord)
+                                .where(TaskRecord.task_id == job.parent_task_id)
+                                .values(status="paused", current_step=message[:500])
+                            )
+                            await db.commit()
+                            await send_log(
+                                "ERROR", message, task_id=job.parent_task_id
+                            )
+                            continue
+
                         from app.models import Account
 
                         occupied = (

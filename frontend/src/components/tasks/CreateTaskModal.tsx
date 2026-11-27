@@ -55,7 +55,9 @@ export function CreateTaskModal({ open, onOpenChange, domains, onSuccess }: Crea
                 setProxyRegions(regions)
                 setFormData(current => ({
                     ...current,
-                    proxy_region: regions.includes(current.proxy_region) ? current.proxy_region : (regions[0] || ''),
+                    // 不再默认选择排序后的第一个地区（此前通常为 JP）。
+                    // 保留用户明确选择；无有效选择时要求重新选择。
+                    proxy_region: regions.includes(current.proxy_region) ? current.proxy_region : '',
                 }))
             })
             .catch(() => setProxyRegions([]))
